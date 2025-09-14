@@ -26,8 +26,6 @@ pip install -r requirements.txt
 3. Create a `.env` file in the root directory:
 ```
 GROQ_API_KEY=your_groq_api_key_here
-env config
-GROQ_API_KEY=your grok key
 ENV=development
 DB_HOST=
 DB_NAME=
