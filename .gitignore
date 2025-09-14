@@ -1,0 +1,27 @@
+# Python virtual environment
+env/
+venv/
+
+# Environment variable files
+.env
+env.json
+mykey.pem
+
+# AWS SAM build artifacts
+.aws-sam/
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# VSCode settings
+.vscode/
+
+# Logs and database files
+*.log
+*.sqlite3
+
+# MacOS files
+.DS_Store

@@ -1,0 +1,31 @@
+name: Deploy FastAPI to EC2
+
+on:
+  push:
+    branches:
+      - main  # change if your default branch is different
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v3
+
+    - name: Setup SSH
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan -H ${{ secrets.EC2_SSH_HOST }} >> ~/.ssh/known_hosts
+
+    - name: Deploy to EC2 server
+      run: |
+        ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_SSH_USER }}@${{ secrets.EC2_SSH_HOST }} -p ${{ secrets.EC2_SSH_PORT }} << 'EOF'
+          cd /home/ubuntu/AIhire
+          git pull origin main
+          source /home/ubuntu/venv/bin/activate
+          pip install -r requirements.txt
+          sudo systemctl restart fastapi
+        EOF
