@@ -26,6 +26,29 @@ pip install -r requirements.txt
 3. Create a `.env` file in the root directory:
 ```
 GROQ_API_KEY=your_groq_api_key_here
+env config
+GROQ_API_KEY=your grok key
+ENV=development
+DB_HOST=
+DB_NAME=
+DB_PASSWORD=
+DB_USER=
+COMPANY_NAME=
+
+POSITION_TITLE=Python Developer
+
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=
+SMTP_USER=
+SMTP_PASS=
+SENDER_EMAIL=
+
+S3_BUCKET=
+CLERK_JWT_PUBLIC_KEY=
+clerk_issue_token_url=
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+AWS_REGION=
 ```
 
 4. Run the application:
@@ -62,29 +85,7 @@ Once the server is running, visit `http://localhost:8000/docs` for interactive A
 - `POST /api/v1/add-record/` - Add a record to the mock database
 
 ## Example API Calls
-env config
-GROQ_API_KEY=your grok key
-ENV=development
-DB_HOST=
-DB_NAME=
-DB_PASSWORD=
-DB_USER=
-COMPANY_NAME=
 
-POSITION_TITLE=Python Developer
-
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=
-SMTP_USER=
-SMTP_PASS=
-SENDER_EMAIL=
-
-S3_BUCKET=
-CLERK_JWT_PUBLIC_KEY=
-clerk_issue_token_url=
-AWS_ACCESS_KEY_ID=
-AWS_SECRET_ACCESS_KEY=
-AWS_REGION=
 
 
 ### Upload Resume
