@@ -293,7 +293,7 @@ class SearchEngine:
                             try:
                                 exp_years = float(experience.split()[0])
                                 if exp_years < experience_years:
-                                    similarity *= 0.5  # Reduce similarity for insufficient experience
+                                    similarity *= 0.25  # Reduce similarity for insufficient experience
                             except:
                                 pass
                         
