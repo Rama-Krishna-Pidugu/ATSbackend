@@ -16,11 +16,11 @@ class ScreeningGenerator:
                     cleaned_questions.append(q)
             return cleaned_questions[:5]
         except Exception as e:
-            print(f"Error generating questions: {str(e)}")
+            print(f"Error generating questions with AI: {str(e)}. Using fallback questions.")
             return [
-                f"1. What is your experience with {skill}?",
-                f"2. How would you approach a complex {skill} problem?",
-                f"3. What are the best practices in {skill}?",
-                f"4. How do you handle debugging in {skill}?",
-                f"5. What's your favorite {skill} feature and why?"
-            ] 
+                f"What is your experience with {skill}?",
+                f"How would you approach a complex {skill} problem?",
+                f"What are the best practices in {skill}?",
+                f"How do you handle debugging in {skill}?",
+                f"What's your favorite {skill} feature and why?"
+            ]

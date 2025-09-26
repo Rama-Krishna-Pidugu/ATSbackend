@@ -95,12 +95,14 @@ class ResumeParser:
                 }
                 
                 # Create a comprehensive text for embedding
+                location = result['contact'].get('location', '') if result['contact'] else ''
                 embedding_text = f"""
                 Name: {result['name']}
                 Summary: {result['summary']}
                 Skills: {', '.join(result['skills'])}
                 Experience: {result['experience']}
                 Education: {result['education']}
+                Location: {location}
                 Certifications: {', '.join(result['certifications'])}
                 Work History: {json.dumps(result['work_history'])}
                 """
@@ -175,15 +177,32 @@ class ResumeParser:
         """Extract contact information from resume text."""
         email_pattern = r'[\w\.-]+@[\w\.-]+\.\w+'
         phone_pattern = r'\+?\d{1,3}[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}'
+        location_pattern = r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*,\s*[A-Z]{2,}\b'  # City, State pattern e.g., "New York, NY"
         
         email = re.search(email_pattern, text)
         phone = re.search(phone_pattern, text)
+        location_match = re.search(location_pattern, text)
         
         contact = {}
         if email:
             contact['email'] = email.group()
         if phone:
             contact['phone'] = phone.group()
+        if location_match:
+            contact['location'] = location_match.group()
+        else:
+            # Fallback: look for common location keywords
+            location_keywords = ['Location:', 'Address:', 'City:']
+            for kw in location_keywords:
+                if kw.lower() in text.lower():
+                    # Extract line after keyword
+                    lines = text.split('\n')
+                    for line in lines:
+                        if kw.lower() in line.lower():
+                            contact['location'] = line.split(kw, 1)[1].strip().split('\n')[0].strip()
+                            break
+                    if 'location' in contact:
+                        break
             
         return contact if contact else None
 

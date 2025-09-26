@@ -250,14 +250,28 @@ class SearchEngine:
                         if not emb_json:  # Skip if embedding is NULL
                             print(f"Skipping resume {resume_id} due to NULL embedding")
                             continue
-                            
+
+                        # Location-based filtering
+                        resume_location = ""
+                        if location:
+                            try:
+                                contact_dict = json.loads(contact) if isinstance(contact, str) else (contact or {})
+                                resume_location = contact_dict.get('location', '').lower()
+                                query_location_lower = location.lower()
+                                if resume_location and query_location_lower not in resume_location and resume_location not in query_location_lower:
+                                    print(f"Skipping resume {resume_id} due to location mismatch: {resume_location} vs {query_location_lower}")
+                                    continue
+                            except (json.JSONDecodeError, TypeError) as e:
+                                print(f"Error parsing contact for resume {resume_id}, skipping: {str(e)}")
+                                continue
+
                         resume_embedding = np.array(json.loads(emb_json))
-                        
+
                         # Calculate cosine similarity
                         similarity = np.dot(query_embedding, resume_embedding) / (
                             np.linalg.norm(query_embedding) * np.linalg.norm(resume_embedding)
                         )
-                        
+
                         # Parse skills and education
                         skills_list = []
                         if isinstance(skills, str):
@@ -267,40 +281,52 @@ class SearchEngine:
                                 skills_list = []
                         elif isinstance(skills, list):
                             skills_list = skills
-                        
+
                         education = education or ""
-                        
+
                         # Keyword matching for better accuracy
                         query_lower = query.lower()
                         education_lower = education.lower()
                         skills_lower = [s.lower() for s in skills_list]
                         summary_lower = (summary or "").lower()
-                        
+
                         # Check for exact keyword matches
                         keyword_matches = 0
                         for keyword in query_lower.split():
-                            if (keyword in education_lower or 
-                                any(keyword in skill for skill in skills_lower) or 
+                            if (keyword in education_lower or
+                                any(keyword in skill for skill in skills_lower) or
                                 keyword in summary_lower):
                                 keyword_matches += 1
-                        
+
+                        # Strict skill matching: if no keyword matches, set similarity to 0
+                        if keyword_matches == 0:
+                            similarity = 0.0
+
                         # Adjust similarity based on keyword matches
                         if keyword_matches > 0:
                             similarity += (keyword_matches * 0.1)  # Boost for each keyword match
-                        
+
+                        # Location-based boosting (strict: already filtered, but confirm boost)
+                        if location and resume_location:
+                            query_location_lower = location.lower()
+                            if query_location_lower in resume_location or resume_location in query_location_lower:
+                                similarity += 0.2  # Boost for location match
+                            else:
+                                similarity = 0.0  # Explicitly set to 0 for mismatch (though filtered earlier)
+
                         # Experience-based filtering
                         if experience_years and experience:
                             try:
                                 exp_years = float(experience.split()[0])
                                 if exp_years < experience_years:
-                                    similarity *= 0.25  # Reduce similarity for insufficient experience
+                                    similarity *= 0.5  # Reduce similarity for insufficient experience
                             except:
                                 pass
-                        
+
                         # Only include results with meaningful similarity
                         if similarity > 0.3:  # Minimum similarity threshold
                             similarities.append((similarity, row))
-                            
+
                     except (json.JSONDecodeError, TypeError) as e:
                         print(f"Error processing embedding for resume {row[0]}: {str(e)}")
                         continue
@@ -420,6 +446,14 @@ class SearchEngine:
                             resume_data = result.fetchone()
                             
                             if resume_data:
+                                # Parse contact for location
+                                location = ""
+                                try:
+                                    contact_dict = json.loads(resume_data[4]) if resume_data[4] else {}
+                                    location = contact_dict.get('location', '')
+                                except:
+                                    pass
+
                                 # Create embedding text
                                 embedding_text = f"""
                                 Name: {resume_data[0]}
@@ -427,6 +461,7 @@ class SearchEngine:
                                 Skills: {resume_data[1] or '[]'}
                                 Experience: {resume_data[2] or ''}
                                 Education: {resume_data[3] or ''}
+                                Location: {location}
                                 """
                                 
                                 # Generate embedding

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from app.services.search_engine import SearchEngine
-from app.models import SearchQuery, SearchResponse, get_db, get_current_user
+from app.models import SearchQuery, SearchResponse, get_db
 from typing import List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -13,7 +13,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from app.auth.clerk import get_current_user
-from fastapi import Request
+from fastapi import Request, Body
 
 router = APIRouter()
 search_engine = SearchEngine()
@@ -27,9 +27,8 @@ async def get_all_resumes(
 ):
     """Get all resumes from the database for the current user."""
     try:
-        # Get user_id from Clerk token
-        user_id = get_current_user(request)
-        print(user_id)
+        # Get user_id from request state
+        user_id = request.state.user_id
         query = text("""
             SELECT id, name, skills, experience, education, contact, summary 
             FROM resumes
@@ -57,14 +56,17 @@ async def get_all_resumes(
 @router.post("/search/", response_model=List[Dict[str, Any]])
 async def search_candidates(
     query: SearchQuery,
-    db: AsyncSession = Depends(get_db),
-    user_id: str = Depends(get_current_user)
+    request: Request,
+    db: AsyncSession = Depends(get_db)
 ):
     """Search candidates based on query parameters using semantic search."""
     try:
         # Verify database state before searching
         search_engine.verify_database()
-        
+
+        # Get user_id from request state
+        user_id = request.state.user_id
+
         # Use the search engine's semantic search with user_id filter
         results = search_engine.search(
             query=query.query,
@@ -116,11 +118,12 @@ async def search_candidates(
 @router.get("/resumes/{resume_id}", response_model=Dict[str, Any])
 async def get_resume(
     resume_id: int,
-    db: AsyncSession = Depends(get_db),
-    user_id: str = Depends(get_current_user)
+    request: Request,
+    db: AsyncSession = Depends(get_db)
 ):
     """Get a specific resume by ID."""
     try:
+        user_id = request.state.user_id
         query = text("""
             SELECT id, name, skills, experience, education, contact, summary 
             FROM resumes 
@@ -150,13 +153,13 @@ async def get_resume(
 @router.post("/add-candidate/")
 async def add_candidate(
     candidate: dict,
-    db: AsyncSession = Depends(get_db),
-    user_id: str = Depends(get_current_user)
+    request: Request,
+    db: AsyncSession = Depends(get_db)
 ):
     """Add a new candidate to the search index."""
     try:
         # Add user_id to the candidate data
-        candidate["user_id"] = user_id
+        candidate["user_id"] = request.state.user_id
         search_engine.add_candidate(candidate)
         return {"message": "Candidate added successfully"}
     except Exception as e:
@@ -164,11 +167,12 @@ async def add_candidate(
 
 @router.delete("/clear-index/")
 async def clear_index(
-    db: AsyncSession = Depends(get_db),
-    user_id: str = Depends(get_current_user)
+    request: Request,
+    db: AsyncSession = Depends(get_db)
 ):
     """Clear the search index for the current user."""
     try:
+        user_id = request.state.user_id
         # Only clear resumes for the current user
         query = text("DELETE FROM resumes WHERE user_id = :user_id")
         await db.execute(query, {"user_id": user_id})
@@ -180,11 +184,12 @@ async def clear_index(
 @router.get("/resume/{resume_id}", response_model=Dict[str, Any])
 async def get_resume_details(
     resume_id: int,
-    db: AsyncSession = Depends(get_db),
-    user_id: str = Depends(get_current_user)
+    request: Request,
+    db: AsyncSession = Depends(get_db)
 ):
     """Get detailed information about a specific resume."""
     try:
+        user_id = request.state.user_id
         query = text("""
             SELECT id, name, skills, experience, education, contact, summary, created_at
             FROM resumes 
@@ -265,32 +270,48 @@ async def get_resume_details(
         raise HTTPException(status_code=500, detail=f"Error retrieving resume details: {str(e)}")
 
 @router.get("/resume/{resume_id}/screening-questions")
-async def get_screening_questions(resume_id: int, db: AsyncSession = Depends(get_db)):
+async def get_screening_questions(resume_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     """Generate AI screening questions for a candidate based on their skills and experience."""
     try:
-        result = await db.execute("SELECT name, skills, experience FROM resumes WHERE id = ?", (resume_id,))
+        user_id = request.state.user_id
+        # For development/testing, use a default user_id if None
+        if user_id is None:
+            user_id = "test_user"
+        query = text("SELECT name, skills, experience FROM resumes WHERE id = :resume_id AND user_id = :user_id")
+        result = await db.execute(query, {"resume_id": resume_id, "user_id": user_id})
         row = result.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Resume not found")
         name, skills_json, experience = row
-        skills = json.loads(skills_json) if skills_json else []
+        try:
+            skills = json.loads(skills_json) if skills_json else []
+        except (json.JSONDecodeError, TypeError):
+            skills = []
         # Use the top skill or fallback
         skill = skills[0] if skills else "developer"
         questions = screening_generator.generate_questions(skill=skill, level="senior" if experience and ("5" in experience or "senior" in experience.lower()) else "mid")
         return {"questions": questions}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating screening questions: {str(e)}")
 
 @router.post("/resume/{resume_id}/generate-email")
-async def generate_outreach_email(resume_id: int, template: str = "initial_outreach", db: AsyncSession = Depends(get_db)):
+async def generate_outreach_email(resume_id: int, request: Request, email_request: dict = Body(...), db: AsyncSession = Depends(get_db)):
     """Generate an outreach email for a candidate based on a template."""
     try:
-        result = await db.execute("SELECT name, skills, experience FROM resumes WHERE id = ?", (resume_id,))
+        template = email_request.get("template", "initial_outreach")
+        user_id = request.state.user_id
+        query = text("SELECT name, skills, experience FROM resumes WHERE id = :resume_id AND user_id = :user_id")
+        result = await db.execute(query, {"resume_id": resume_id, "user_id": user_id})
         row = result.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Resume not found")
         name, skills_json, experience = row
-        skills = json.loads(skills_json) if skills_json else []
+        try:
+            skills = json.loads(skills_json) if skills_json else []
+        except (json.JSONDecodeError, TypeError):
+            skills = []
         skill = skills[0] if skills else "developer"
         key_skills = ", ".join(skills) if skills else skill
         # You can expand template logic as needed
@@ -307,25 +328,35 @@ async def generate_outreach_email(resume_id: int, template: str = "initial_outre
             key_skills=key_skills
         )
         return email
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating outreach email: {str(e)}")
 
 @router.post("/resume/{resume_id}/send-email")
-async def send_email(resume_id: int, payload: dict):
+async def send_email(resume_id: int, request: Request, payload: dict = Body(...), db: AsyncSession = Depends(get_db)):
     """Send an email to the candidate using SMTP config from .env."""
-    to_email = payload.get("to")
-    subject = payload.get("subject")
-    body = payload.get("body")
-    if not (to_email and subject and body):
-        raise HTTPException(status_code=400, detail="Missing to, subject, or body.")
-    smtp_host = os.getenv("SMTP_HOST")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
-    smtp_user = os.getenv("SMTP_USER")
-    smtp_pass = os.getenv("SMTP_PASS")
-    sender_email = os.getenv("SENDER_EMAIL")
-    if not all([smtp_host, smtp_port, smtp_user, smtp_pass, sender_email]):
-        raise HTTPException(status_code=500, detail="SMTP configuration is incomplete.")
     try:
+        user_id = request.state.user_id
+        # Check if resume belongs to user
+        query = text("SELECT id FROM resumes WHERE id = :resume_id AND user_id = :user_id")
+        result = await db.execute(query, {"resume_id": resume_id, "user_id": user_id})
+        if not result.fetchone():
+            raise HTTPException(status_code=404, detail="Resume not found")
+        
+        to_email = payload.get("recipient")
+        subject = payload.get("subject")
+        body = payload.get("email_body")
+        if not (to_email and subject and body):
+            raise HTTPException(status_code=400, detail="Missing recipient, subject, or email_body.")
+        smtp_host = os.getenv("SMTP_HOST")
+        smtp_port = int(os.getenv("SMTP_PORT", "587"))
+        smtp_user = os.getenv("SMTP_USER")
+        smtp_pass = os.getenv("SMTP_PASS")
+        sender_email = os.getenv("SENDER_EMAIL")
+        if not all([smtp_host, smtp_user, smtp_pass, sender_email]):
+            print("Warning: SMTP configuration incomplete. Simulating email send for development.")
+            return {"message": "Email simulated (SMTP config missing). Check logs for details."}
         msg = MIMEMultipart()
         msg["From"] = sender_email
         msg["To"] = to_email
@@ -336,16 +367,19 @@ async def send_email(resume_id: int, payload: dict):
             server.login(smtp_user, smtp_pass)
             server.sendmail(sender_email, to_email, msg.as_string())
         return {"message": "Email sent successfully."}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
 
 @router.get("/dashboard-metrics")
 async def dashboard_metrics(
-    db: AsyncSession = Depends(get_db),
-    user_id: str = Depends(get_current_user)
+    request: Request,
+    db: AsyncSession = Depends(get_db)
 ):
     """Return dashboard metrics for the current user."""
     try:
+        user_id = request.state.user_id
         # Total candidates for the user
         query = text("SELECT COUNT(*) FROM resumes WHERE user_id = :user_id")
         result = await db.execute(query, {"user_id": user_id})

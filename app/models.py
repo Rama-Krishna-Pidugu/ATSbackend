@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 from jose import jwt
-from fastapi import Header, HTTPException, Depends
+from fastapi import Header, HTTPException
 
 # Get the app directory path
 APP_DIR = Path(__file__).resolve().parent
@@ -74,18 +74,6 @@ async def get_db():
 # Authentication dependencies
 CLERK_JWT_PUBLIC_KEY = os.getenv("CLERK_JWT_PUBLIC_KEY")
 
-async def get_current_user(authorization: str = Header(...)) -> str:
-    """Extract and validate the user ID from the JWT token."""
-    try:
-        if not authorization.startswith("Bearer "):
-            raise HTTPException(status_code=401, detail="Invalid authorization header")
-            
-        token = authorization.split(" ")[1]
-        payload = jwt.decode(token, CLERK_JWT_PUBLIC_KEY, algorithms=["RS256"])
-        return payload["sub"]  # Clerk uses 'sub' as the unique user ID
-    except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
-
 class ResumeUploadResponse(BaseModel):
     name: str
     skills: List[str]
@@ -129,6 +117,7 @@ class EmailRequest(BaseModel):
     skill: str
     company_name: Optional[str] = None
     position: Optional[str] = None
+    recipient_email: str
 
 class EmailResponse(BaseModel):
     email: str
@@ -139,4 +128,4 @@ class BackgroundCheckRequest(BaseModel):
 
 class BackgroundCheckResponse(BaseModel):
     status: str
-    details: str 
+    details: str
