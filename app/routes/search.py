@@ -8,12 +8,14 @@ import json
 import sqlite3
 from app.services.screening_generator import ScreeningGenerator
 from app.services.email_generator import EmailGenerator
+from app.services.llm_utils import call_groq
 import os
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from app.auth.clerk import get_current_user
 from fastapi import Request, Body
+import json
 
 router = APIRouter()
 search_engine = SearchEngine()
@@ -67,11 +69,47 @@ async def search_candidates(
         # Get user_id from request state
         user_id = request.state.user_id
 
+        # Parse location and experience_years from query if not provided
+        location = query.location
+        experience_years = query.experience_years
+
+        if location is None or experience_years is None:
+            try:
+                prompt = f"""
+                Extract the location and years of experience from this job search query.
+                Return ONLY a JSON object in this exact format:
+                {{"location": "city name or null", "experience_years": number or null}}
+
+                Examples:
+                Query: "Python developers in Bangalore"
+                {{"location": "Bangalore", "experience_years": null}}
+
+                Query: "React developers with 5 years experience"
+                {{"location": null, "experience_years": 5}}
+
+                Query: "JavaScript developers in Mumbai with 3+ years"
+                {{"location": "Mumbai", "experience_years": 3}}
+
+                Query: "Find data scientists"
+                {{"location": null, "experience_years": null}}
+
+                Query: "{query.query}"
+                """
+                response, _ = call_groq(prompt, temperature=0.0, max_tokens=100)
+                parsed = json.loads(response.strip())
+                if location is None:
+                    location = parsed.get("location")
+                if experience_years is None:
+                    experience_years = parsed.get("experience_years")
+            except Exception as e:
+                print(f"Error parsing query: {str(e)}")
+                # Continue with None values
+
         # Use the search engine's semantic search with user_id filter
         results = search_engine.search(
             query=query.query,
-            location=query.location,
-            experience_years=query.experience_years,
+            location=location,
+            experience_years=experience_years,
             user_id=user_id
         )
         
@@ -97,6 +135,14 @@ async def search_candidates(
                     except json.JSONDecodeError:
                         contact = {}
                 
+                # Ensure similarity_score is a float within 0..1
+                sim = match.get("similarity_score", 0)
+                try:
+                    sim = float(sim)
+                except Exception:
+                    sim = 0.0
+                sim = max(0.0, min(sim, 1.0))
+
                 processed_results.append({
                     "id": match["id"],
                     "name": match["name"],
@@ -105,7 +151,7 @@ async def search_candidates(
                     "education": match["education"],
                     "contact": contact,
                     "summary": match["summary"],
-                    "similarity_score": match.get("similarity_score", 0)
+                    "similarity_score": sim
                 })
             except Exception as e:
                 print(f"Error processing match: {str(e)}")

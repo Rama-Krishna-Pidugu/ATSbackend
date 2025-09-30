@@ -163,6 +163,13 @@ class SearchEngine:
                             similarity += 0.1
                         
                         print(f"Final similarity score: {similarity}")
+                        # Clamp similarity to valid range (cosine can be -1..1, but we boost/scale it)
+                        try:
+                            similarity = float(similarity)
+                        except Exception:
+                            similarity = 0.0
+                        # Ensure similarity is within 0.0 - 1.0 before storing
+                        similarity = max(0.0, min(similarity, 1.0))
                         similarities.append((similarity, resume_id))
                     except (json.JSONDecodeError, TypeError) as e:
                         print(f"Error processing resume {resume_id}: {str(e)}")
@@ -190,6 +197,12 @@ class SearchEngine:
                     try:
                         # Find the similarity score for this resume
                         similarity_score = next((score for score, rid in top_matches if rid == row[0]), 0)
+                        # Safety clamp: ensure similarity_score is float and within 0..1
+                        try:
+                            similarity_score = float(similarity_score)
+                        except Exception:
+                            similarity_score = 0.0
+                        similarity_score = max(0.0, min(similarity_score, 1.0))
                         
                         results.append({
                             "id": row[0],
@@ -251,19 +264,28 @@ class SearchEngine:
                             print(f"Skipping resume {resume_id} due to NULL embedding")
                             continue
 
-                        # Location-based filtering
-                        resume_location = ""
+                        # Location-based similarity calculation (no skipping, include all)
+                        location_similarity = 1.0  # Default if no location filter
                         if location:
                             try:
                                 contact_dict = json.loads(contact) if isinstance(contact, str) else (contact or {})
-                                resume_location = contact_dict.get('location', '').lower()
-                                query_location_lower = location.lower()
-                                if resume_location and query_location_lower not in resume_location and resume_location not in query_location_lower:
-                                    print(f"Skipping resume {resume_id} due to location mismatch: {resume_location} vs {query_location_lower}")
-                                    continue
+                                resume_location = contact_dict.get('location', '')
+                                if resume_location:
+                                    # Create embeddings for location comparison
+                                    query_location_embedding = self.model.encode(location)
+                                    resume_location_embedding = self.model.encode(resume_location)
+                                    location_similarity = np.dot(query_location_embedding, resume_location_embedding) / (
+                                        np.linalg.norm(query_location_embedding) * np.linalg.norm(resume_location_embedding)
+                                    )
+                                    print(f"Resume {resume_id} location similarity: {location_similarity:.4f}")
+                                else:
+                                    # No location in resume, reduce similarity
+                                    location_similarity = 0.3
+                                    print(f"Resume {resume_id} has no location, using similarity: {location_similarity}")
                             except (json.JSONDecodeError, TypeError) as e:
-                                print(f"Error parsing contact for resume {resume_id}, skipping: {str(e)}")
-                                continue
+                                # Error parsing location, use neutral similarity
+                                location_similarity = 0.5
+                                print(f"Error parsing location for resume {resume_id}, using similarity: {location_similarity}")
 
                         resume_embedding = np.array(json.loads(emb_json))
 
@@ -306,22 +328,29 @@ class SearchEngine:
                         if keyword_matches > 0:
                             similarity += (keyword_matches * 0.1)  # Boost for each keyword match
 
-                        # Location-based boosting (strict: already filtered, but confirm boost)
-                        if location and resume_location:
-                            query_location_lower = location.lower()
-                            if query_location_lower in resume_location or resume_location in query_location_lower:
-                                similarity += 0.2  # Boost for location match
-                            else:
-                                similarity = 0.0  # Explicitly set to 0 for mismatch (though filtered earlier)
+                        # Location-based boosting using cosine similarity with bounds 0 to 100
+                        if location:
+                            # Clamp similarity to 0-1 range before scaling
+                            clamped_location_similarity = max(0.0, min(location_similarity, 1.0))
+                            if clamped_location_similarity > 0.7:
+                                similarity += (clamped_location_similarity * 10)  # Boost scaled to max 10 (out of 100)
+                            elif clamped_location_similarity < 0.3:
+                                similarity *= 0.7  # Reduce similarity for poor location match
 
-                        # Experience-based filtering
+                        # Experience-based filtering (stronger penalty for shortfall)
                         if experience_years and experience:
                             try:
+                                # Try to extract leading number of years from experience field
                                 exp_years = float(experience.split()[0])
                                 if exp_years < experience_years:
-                                    similarity *= 0.5  # Reduce similarity for insufficient experience
-                            except:
-                                pass
+                                    shortfall = experience_years - exp_years
+                                    # Apply an exponential penalty per missing year to reduce similarity more for larger gaps.
+                                    # Use base 0.4 (more aggressive than simple halving). Minimum penalty floor is 0.05.
+                                    penalty = max(0.05, (0.4 ** shortfall))
+                                    similarity *= penalty
+                            except Exception:
+                                # If parsing fails, apply a conservative penalty
+                                similarity *= 0.4
 
                         # Only include results with meaningful similarity
                         if similarity > 0.3:  # Minimum similarity threshold
@@ -337,6 +366,13 @@ class SearchEngine:
                 # Get top matches
                 matches = []
                 for similarity, row in similarities[:5]:  # Get top 5 matches
+                    # Clamp similarity to 0..1 and convert to float
+                    try:
+                        sim_val = float(similarity)
+                    except Exception:
+                        sim_val = 0.0
+                    sim_val = max(0.0, min(sim_val, 1.0))
+
                     matches.append({
                         "id": row[0],
                         "name": row[1],
@@ -347,7 +383,7 @@ class SearchEngine:
                         "summary": row[6],
                         "certifications": row[8],
                         "work_history": row[9],
-                        "similarity_score": float(similarity)
+                        "similarity_score": sim_val
                     })
                 
                 if not matches:
