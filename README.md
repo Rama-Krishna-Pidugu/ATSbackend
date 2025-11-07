@@ -83,7 +83,7 @@ Once the server is running, visit `http://localhost:8000/docs` for interactive A
 - `POST /api/v1/add-record/` - Add a record to the mock database
 
 ## Example API Calls
-
+.
 
 
 ### Upload Resume
