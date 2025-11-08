@@ -27,7 +27,7 @@ app = FastAPI(
 )
 
 # Allow all origins (dev only, restrict in prod)
-origins = ["http://localhost:8080", "https://main.d3r5nh3ds41tf9.amplifyapp.com"]  # Replace with your frontend URL in production (e.g., "https://yourfrontend.com")
+origins = ["http://localhost:8080", "https://main.dibr3rch5hdjx.amplifyapp.com"]  # Replace with your frontend URL in production (e.g., "https://yourfrontend.com")
 
 # CORS middleware must be added before including routers
 app.add_middleware(
